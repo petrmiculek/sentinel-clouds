@@ -1,0 +1,50 @@
+[2023-11-03 10:55]
+
+Plan: 
+- Explore data: plot some images, understand format, get basic dataset statistics
+
+- Train U-Net from scratch
+    - output channels: 1 + thresholding, or 2 + softmax
+    - MSE
+    - eval MSE, maybe structural metrics
+- Cookiecutter template: start with notebooks, maybe turn into py modules later
+
+Doing:
+- Downloading dataset
+- Exploratory Data Analysis notebook - 
+
+[2023-11-05 23:55]
+
+Tiling done
+- crop, pad, mask
+- untiling needs testing
+- 
+
+[2023-11-07 14:02]
+
+Training
+- works
+
+Plan:
+- Eval notebook - visualize predictions
+- ONNX runner
+
+- dataset handling
+    - fixed dataset splits filelists, contain only filenames
+    - all preprocessing done live
+    - directory structure assumed:
+        <dataset_root>
+            - filelists
+                - train/val/test.csv
+            - scenes
+                - <file1..N>
+            - masks
+                - <file1..N>
+
+
+- Model output and postprocessing
+    - model outputs -inf .. +inf 
+    - softmax doesn't make sense across spatial dims and there's no channel for that
+    - 2 channels + softmax within the model
+    - then I should train with a loss that acccounts for the softmax
+    - 
