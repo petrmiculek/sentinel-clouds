@@ -1,7 +1,36 @@
 import numpy as np
 import torch
+from tqdm.notebook import tqdm
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, jaccard_score
+
+def evaluate(model, loader, criterion=None, device='cuda'):
+    model.eval()
+    loss = 0
+    labels, preds = [], []
+    with torch.no_grad():
+        for s in tqdm(loader):
+            x, y = s['image'].to(device), s['label'].to(device)
+            pred = model.predict(x)
+            if criterion is not None:
+                loss += criterion(pred, y).item()
+            labels.append(y.cpu().numpy())
+            preds.append(pred.cpu().numpy())
+    return {"loss": loss / len(loader),
+            "labels": np.concatenate(labels),
+            "preds": np.concatenate(preds)}
+
+def compute_metrics(labels, preds, use_th=True):
+    labels, preds = labels.flatten(), preds.flatten()
+    if use_th:
+        preds = preds > 0.5
+    return {'Accuracy': accuracy_score(labels, preds),
+            'Precision': precision_score(labels, preds),
+            'Recall': recall_score(labels, preds),
+            'F1': f1_score(labels, preds),
+            'IoU': jaccard_score(labels, preds)}
+
 """
-    :filename util_torch.py (originally EarlyStopping.py)
+    :filename util.py (originally EarlyStopping.py)
 
     Early Stopping adapted from: vvvvvvv
 

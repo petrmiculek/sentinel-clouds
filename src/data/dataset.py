@@ -11,7 +11,7 @@ import pandas as pd
 # local
 from src.data.tiling import crop, pad, pad_with_mask, tile
 
-class CloudDataset(Dataset):
+class CloudRawDataset(Dataset):
     def __init__(self, path_filelist, path_data, tile_size=None, crop_pad_mask='crop'):
         self.path = path_data
         try:
@@ -74,19 +74,43 @@ class CloudDataset(Dataset):
         else: 
             pad_mask = np.ones((1, x.shape[1], x.shape[2]), dtype=np.float32)
         y = self.labels[index]
-        return {'image': x, 'label': y, 'pad_mask': pad_mask}   
+        return {'image': x, 'label': y, 'pad_mask': pad_mask}
+    
+    def save_processed(self, path_save):
+        """ Save processed dataset to disk. """
+        np.savez(path_save, images=self.images, labels=self.labels)
+    
+class CloudProcessedDataset(CloudRawDataset):
+    def __init__(self, path_data, **kwargs):
+        if len(kwargs) > 0:
+            print(f'Ignoring dataset args: {kwargs}')
+        # load npz with images and labels
+        data = np.load(path_data)
+        self.images = data['images']
+        self.labels = data['labels']
 
-
-def get_loaders(path_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
+def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """
     # TODO seed for workers
-    path_filelist_train = join(path_data, 'filelists', 'train.csv')
-    path_filelist_val = join(path_data, 'filelists', 'val.csv')
-    path_filelist_test = join(path_data, 'filelists', 'test.csv')
-    dataset_kwargs = {'path_data': path_data, 'tile_size': tile_size, 'crop_pad_mask': crop_pad_mask}
-    dataset_train = CloudDataset(path_filelist_train, **dataset_kwargs)
-    dataset_val = CloudDataset(path_filelist_val, **dataset_kwargs)
-    dataset_test = CloudDataset(path_filelist_test, **dataset_kwargs)
+    path_filelist_train = join(dir_data, 'filelists', 'train.csv')
+    path_filelist_val = join(dir_data, 'filelists', 'val.csv')
+    path_filelist_test = join(dir_data, 'filelists', 'test.csv')
+    dataset_kwargs = {'path_data': dir_data, 'tile_size': tile_size, 'crop_pad_mask': crop_pad_mask}
+    dataset_train = CloudRawDataset(path_filelist_train, **dataset_kwargs)
+    dataset_val = CloudRawDataset(path_filelist_val, **dataset_kwargs)
+    dataset_test = CloudRawDataset(path_filelist_test, **dataset_kwargs)
+    loader_train = DataLoader(dataset_train, shuffle=True, **loader_kwargs)
+    loader_valid = DataLoader(dataset_val, **loader_kwargs)
+    loader_test = DataLoader(dataset_test, **loader_kwargs)
+    return {'train': loader_train, 'val': loader_valid, 'test': loader_test}
+
+def get_loaders_processed(dir_data_processed, **loader_kwargs):
+    if 'tile_size' in loader_kwargs or 'crop_pad_mask' in loader_kwargs:
+        print(f'Ignoring dataset args: {loader_kwargs}')
+    
+    dataset_train = CloudProcessedDataset(join(dir_data_processed, 'train.npz'))
+    dataset_val = CloudProcessedDataset(join(dir_data_processed, 'val.npz'))
+    dataset_test = CloudProcessedDataset(join(dir_data_processed, 'test.npz'))
     loader_train = DataLoader(dataset_train, shuffle=True, **loader_kwargs)
     loader_valid = DataLoader(dataset_val, **loader_kwargs)
     loader_test = DataLoader(dataset_test, **loader_kwargs)

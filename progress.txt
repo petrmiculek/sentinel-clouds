@@ -10,20 +10,16 @@ Plan:
 - Cookiecutter template: start with notebooks, maybe turn into py modules later
 
 Doing:
-- Downloading dataset
-- Exploratory Data Analysis notebook - 
+- Download dataset
+- Exploratory Data Analysis notebook - read data, preprocess, plot samples
 
 [2023-11-05 23:55]
-
 Tiling done
 - crop, pad, mask
-- untiling needs testing
-- 
+- untiling needs testing (skipping for now)
 
 [2023-11-07 14:02]
-
-Training
-- works
+Training works
 
 Plan:
 - Eval notebook - visualize predictions
@@ -43,8 +39,14 @@ Plan:
 
 
 - Model output and postprocessing
-    - model outputs -inf .. +inf 
-    - softmax doesn't make sense across spatial dims and there's no channel for that
+    - output logits, BCEWithLogitsLoss, manual sigmoid() after, or use .predict()
     - 2 channels + softmax within the model
-    - then I should train with a loss that acccounts for the softmax
-    - 
+
+[2023-11-08 00:37]
+Next:
+- Train on full dataset
+- Log to W&B
+- Train padded
+- Use padding and mask
+- 7mins+ for datasets loading
+- Augmentations?
