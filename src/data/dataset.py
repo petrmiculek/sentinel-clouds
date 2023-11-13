@@ -12,8 +12,6 @@ from tqdm.notebook import tqdm
 
 # local
 from src.data.tiling import crop, pad, pad_with_mask, tile
-from multiprocessing import Pool, cpu_count
-from functools import partial
 
 class CloudRawDataset(Dataset):
     def __init__(self, path_filelist, path_data, tile_size=None, crop_pad_mask='crop'):
@@ -30,7 +28,6 @@ class CloudRawDataset(Dataset):
         # pre-load images and labels
         self.images = []
         self.labels = []
-        for f in tqdm(self.images_filenames, desc=f'Loading: {path_filelist}'):
         for f in tqdm(self.images_filenames, desc=f'Loading: {path_filelist}'):
             x = np.load(join(path_data, 'subscenes', f))
             y = np.load(join(path_data, 'masks', f))
@@ -92,7 +89,7 @@ class CloudRawDataset(Dataset):
         self.labels = labels
 
     def __len__(self):
-        return len(self.images_filenames)
+        return len(self.images)
 
     def __getitem__(self, index):
         x = self.images[index]
@@ -128,7 +125,6 @@ def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs)
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """
     # TODO seed for workers
     shuffle_train = loader_kwargs.pop('shuffle', True)
-    shuffle_train = loader_kwargs.pop('shuffle', True)
     path_filelist_train = join(dir_data, 'filelists', 'train.csv')
     path_filelist_val = join(dir_data, 'filelists', 'val.csv')
     path_filelist_test = join(dir_data, 'filelists', 'test.csv')
@@ -137,18 +133,25 @@ def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs)
     dataset_val = CloudRawDataset(path_filelist_val, **dataset_kwargs)
     dataset_test = CloudRawDataset(path_filelist_test, **dataset_kwargs)
     loader_train = DataLoader(dataset_train, shuffle=shuffle_train, **loader_kwargs)
-    loader_train = DataLoader(dataset_train, shuffle=shuffle_train, **loader_kwargs)
     loader_valid = DataLoader(dataset_val, **loader_kwargs)
     loader_test = DataLoader(dataset_test, **loader_kwargs)
     return {'train': loader_train, 'val': loader_valid, 'test': loader_test}
 
-def get_loaders_processed(dir_data_processed, **loader_kwargs):
-    if 'tile_size' in loader_kwargs or 'crop_pad_mask' in loader_kwargs:
-        print(f'Ignoring dataset args: {loader_kwargs}')
-    dataset_train = CloudProcessedDataset(join(dir_data_processed, 'train.npz'))
-    dataset_val = CloudProcessedDataset(join(dir_data_processed, 'val.npz'))
-    dataset_test = CloudProcessedDataset(join(dir_data_processed, 'test.npz'))
-    loader_train = DataLoader(dataset_train, shuffle=True, **loader_kwargs)
-    loader_valid = DataLoader(dataset_val, **loader_kwargs)
-    loader_test = DataLoader(dataset_test, **loader_kwargs)
-    return {'train': loader_train, 'val': loader_valid, 'test': loader_test}
+def get_loaders_processed(dir_data_processed, splits=None, **loader_kwargs):
+    """ Dataset-loading wrapper - get train/val/test DataLoaders. """
+    if splits is None:  # get all splits
+        splits = ['train', 'val', 'test']
+    # TODO seed for workers
+    tile_size = loader_kwargs.pop('tile_size', None)
+    crop_pad_mask = loader_kwargs.pop('crop_pad_mask', None)
+    if tile_size is not None or crop_pad_mask is not None:
+        print(f'Ignoring dataset args: {loader_kwargs}, loading dataset already processed.')
+    shuffle_train = loader_kwargs.pop('shuffle', True)
+    loaders = dict()
+    for split in splits:
+        assert split in ['train', 'val', 'test']
+        shuffle = shuffle_train if split == 'train' else False
+        dataset = CloudProcessedDataset(join(dir_data_processed, f'{split}.npz'))
+        loader = DataLoader(dataset, shuffle=shuffle, **loader_kwargs)
+        loaders[split] = loader
+    return loaders

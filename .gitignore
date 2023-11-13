@@ -96,3 +96,6 @@ target/
 # ignore top-level pdfs
 /*.pdf  
 
+*.wandb
+wandb
+scratch

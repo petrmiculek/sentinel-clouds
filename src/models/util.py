@@ -19,16 +19,22 @@ def evaluate(model, loader, criterion=None, device='cuda'):
             "labels": np.concatenate(labels),
             "preds": np.concatenate(preds)}
 
-def compute_metrics(labels, preds, use_th=True):
+def compute_metrics(labels, preds, use_th=True, suffix=None):
     labels, preds = labels.flatten(), preds.flatten()
     if use_th:
         preds = preds > 0.5
-    return {'Accuracy': accuracy_score(labels, preds),
+    res = {'Accuracy': accuracy_score(labels, preds),
             'Precision': precision_score(labels, preds),
             'Recall': recall_score(labels, preds),
             'F1': f1_score(labels, preds),
             'IoU': jaccard_score(labels, preds)}
+    if suffix is not None:
+        res = keys_append(res, suffix)
+    return res
 
+def keys_append(dictionary, suffix):
+    """Appends suffix to all keys in dictionary."""
+    return {k + suffix: v for k, v in dictionary.items()}
 """
     :filename util.py (originally EarlyStopping.py)
 
