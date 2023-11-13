@@ -1,19 +1,23 @@
 """ Dataset class for clouds segmentation. """
 # standard library
 import os
-from os.path import join, dirname
+from os.path import join, dirname, dirname
 
 # external
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 from tqdm.notebook import tqdm
+from tqdm.notebook import tqdm
 
 # local
 from src.data.tiling import crop, pad, pad_with_mask, tile
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 class CloudRawDataset(Dataset):
     def __init__(self, path_filelist, path_data, tile_size=None, crop_pad_mask='crop'):
+        self.path_filelist = path_filelist
         self.path_filelist = path_filelist
         self.path = path_data
         self.tile_size = tile_size
@@ -26,6 +30,7 @@ class CloudRawDataset(Dataset):
         # pre-load images and labels
         self.images = []
         self.labels = []
+        for f in tqdm(self.images_filenames, desc=f'Loading: {path_filelist}'):
         for f in tqdm(self.images_filenames, desc=f'Loading: {path_filelist}'):
             x = np.load(join(path_data, 'subscenes', f))
             y = np.load(join(path_data, 'masks', f))
@@ -102,6 +107,7 @@ class CloudRawDataset(Dataset):
     def save_processed(self, path_save):
         """ Save processed dataset to disk. """
         os.makedirs(dirname(path_save), exist_ok=True)
+        os.makedirs(dirname(path_save), exist_ok=True)
         np.savez(path_save, images=self.images, labels=self.labels)
     
 class CloudProcessedDataset(CloudRawDataset):
@@ -122,6 +128,7 @@ def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs)
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """
     # TODO seed for workers
     shuffle_train = loader_kwargs.pop('shuffle', True)
+    shuffle_train = loader_kwargs.pop('shuffle', True)
     path_filelist_train = join(dir_data, 'filelists', 'train.csv')
     path_filelist_val = join(dir_data, 'filelists', 'val.csv')
     path_filelist_test = join(dir_data, 'filelists', 'test.csv')
@@ -129,6 +136,7 @@ def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs)
     dataset_train = CloudRawDataset(path_filelist_train, **dataset_kwargs)
     dataset_val = CloudRawDataset(path_filelist_val, **dataset_kwargs)
     dataset_test = CloudRawDataset(path_filelist_test, **dataset_kwargs)
+    loader_train = DataLoader(dataset_train, shuffle=shuffle_train, **loader_kwargs)
     loader_train = DataLoader(dataset_train, shuffle=shuffle_train, **loader_kwargs)
     loader_valid = DataLoader(dataset_val, **loader_kwargs)
     loader_test = DataLoader(dataset_test, **loader_kwargs)
