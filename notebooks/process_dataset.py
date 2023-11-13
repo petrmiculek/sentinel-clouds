@@ -12,11 +12,9 @@ import argparse
 
 if __name__ == '__main__':
     # %% Parse arguments
-    path_data = '/mnt/sdb1/code/sentinel2/interim'
-    path_processed = '/mnt/sdb1/code/sentinel2/processed'
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', default=path_data, type=str)
-    parser.add_argument('--output_dir', default=path_processed, type=str)
+    parser.add_argument('--input_dir', default='/mnt/sdb1/code/sentinel2/interim', type=str)
+    parser.add_argument('--output_dir', default='/mnt/sdb1/code/sentinel2/processed', type=str)
     args = parser.parse_args()
     # %% 
     dataset_kwargs = {'tile_size': 224, 'crop_pad_mask': 'crop'}
@@ -24,21 +22,21 @@ if __name__ == '__main__':
     path_filelist_val = join(args.input_dir, 'filelists', 'val.csv')
     path_filelist_test = join(args.input_dir, 'filelists', 'test.csv')
     # %% Load, process, save - validation set
-    dataset_val = CloudRawDataset(path_filelist_val, path_data, **dataset_kwargs)
-    path_out_val = join(path_processed, 'val.npz')
+    dataset_val = CloudRawDataset(path_filelist_val, args.input_dir, **dataset_kwargs)
+    path_out_val = join(args.output_dir, 'val.npz')
     dataset_val.save_processed(path_out_val)
     # %% Load back dataset, check correctness
-    path_out_val = join(path_processed, 'val.npz')
+    path_out_val = join(args.output_dir, 'val.npz')
     dataset_val2 = CloudProcessedDataset(path_out_val)
     assert np.allclose(dataset_val[0]['image'], dataset_val2[0]['image'])
     assert np.allclose(dataset_val[0]['label'], dataset_val2[0]['label'])
     # %% test set
     # del dataset_val, dataset_val2
-    path_out_test = join(path_processed, 'test.npz')
-    dataset_test = CloudRawDataset(path_filelist_test, path_data, **dataset_kwargs)
+    path_out_test = join(args.output_dir, 'test.npz')
+    dataset_test = CloudRawDataset(path_filelist_test, args.input_dir, **dataset_kwargs)
     dataset_test.save_processed(path_out_test)
     # %% train set
     # del dataset_test
-    path_out_train = join(path_processed, 'train.npz')
-    dataset_train = CloudRawDataset(path_filelist_train, path_data, **dataset_kwargs)
+    path_out_train = join(args.output_dir, 'train.npz')
+    dataset_train = CloudRawDataset(path_filelist_train, args.input_dir, **dataset_kwargs)
     dataset_train.save_processed(path_out_train)
