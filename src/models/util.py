@@ -163,3 +163,41 @@ class EarlyStopping:
             self.trace_func(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
+
+class DiceLoss(torch.nn.Module):
+    def __init__(self) -> None:
+        super(DiceLoss, self).__init__()
+        self.eps: float = 1e-6
+
+    def forward(
+            self,
+            pred: torch.Tensor,
+            target: torch.Tensor) -> torch.Tensor:
+        if not torch.is_tensor(pred):
+            raise TypeError("Input type is not a torch.Tensor. Got {}"
+                            .format(type(pred)))
+        if not len(pred.shape) == 4:
+            raise ValueError("Invalid pred shape, we expect BxNxHxW. Got: {}"
+                             .format(pred.shape))
+        if not pred.shape[-2:] == target.shape[-2:]:
+            raise ValueError("pred and target shapes must be the same. Got: {}"
+                             .format(pred.shape, pred.shape))
+        if not pred.device == target.device:
+            raise ValueError(
+                "pred and target must be in the same device. Got: {}" .format(
+                    pred.device, target.device))
+        # compute softmax over the classes axis
+        # - model outputs are already softmax-ed
+
+        # create the labels one hot tensor
+        # target_one_hot = one_hot(target, num_classes=pred.shape[1],
+                                #  device=pred.device, dtype=pred.dtype)
+        # - Binary labels => not needed. ... but my impl will behave differently
+
+        # compute the actual dice score
+        dims = (1, 2, 3)
+        intersection = torch.sum(pred * target, dims)
+        union = torch.sum(pred + target, dims)
+
+        dice_score = 2. * intersection / (union + self.eps)
+        return torch.mean(1. - dice_score)

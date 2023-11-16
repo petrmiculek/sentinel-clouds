@@ -25,7 +25,7 @@ import wandb as wb
 # local
 from src.data.dataset import get_loaders, get_loaders_processed
 from src.models.unet import UNet
-from src.models.util import EarlyStopping, evaluate_metrics, compute_metrics_own, keys_append
+from src.models.util import EarlyStopping, evaluate_metrics, compute_metrics_own, keys_append, DiceLoss
 
 # set numpy/torch print precision .4f
 np.set_printoptions(precision=4, suppress=True)
@@ -144,3 +144,15 @@ if False:
     # save model as onnx
     dummy_input = torch.randn(1, 4, 224, 224, device='cuda')
     torch.onnx.export(model, dummy_input, "model.onnx", verbose=True, opset_version=11, input_names=['input'], output_names=['output'])
+
+
+# %% Save a batch of predictions to W&B tables
+table = wb.Table(columns=['Image', 'Label', 'Prediction'])
+for i, _ in enumerate(img):
+    # convert image to numpy hwc, label to rgb
+    img_i = img[i].cpu().numpy().transpose((1, 2, 0))
+    label_i = np.stack([label[i].cpu().numpy()] * 3, axis=-1)
+    pred_i = np.stack([pred[i].cpu().numpy()] * 3, axis=-1)
+    table.add_data(wb.Image(img_i), wb.Image(label_i), wb.Image(pred_i))
+
+wb.log({'Training Batch': table})
