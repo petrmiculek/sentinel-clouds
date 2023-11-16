@@ -13,8 +13,8 @@ import argparse
 if __name__ == '__main__':
     # %% Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', default='/mnt/sdb1/code/sentinel2/interim', type=str)
-    parser.add_argument('--output_dir', default='/mnt/sdb1/code/sentinel2/processed', type=str)
+    parser.add_argument('--input_dir', '-i', default='/mnt/sdb1/code/sentinel2/interim', type=str)
+    parser.add_argument('--output_dir', '-o',default='/mnt/sdb1/code/sentinel2/processed', type=str)
     args = parser.parse_args()
     # %% 
     dataset_kwargs = {'tile_size': 224, 'crop_pad_mask': 'crop'}

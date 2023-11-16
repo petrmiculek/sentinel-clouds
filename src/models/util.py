@@ -1,23 +1,11 @@
 import numpy as np
 import torch
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, jaccard_score
 
-def evaluate(model, loader, criterion=None, device='cuda'):
-    model.eval()
-    loss = 0
-    labels, preds = [], []
-    with torch.no_grad():
-        for s in tqdm(loader):
-            x, y = s['image'].to(device), s['label'].to(device)
-            pred = model.predict(x)
-            if criterion is not None:
-                loss += criterion(pred, y).item()
-            labels.append(y.cpu().numpy())
-            preds.append(pred.cpu().numpy())
-    return {"loss": loss / len(loader),
-            "labels": np.concatenate(labels),
-            "preds": np.concatenate(preds)}
+def lod_mean(list_of_dicts):
+    """ Per-key mean of a list of dictionaries. """
+    return {k: np.mean([i[k] for i in list_of_dicts]) for k in list_of_dicts[0].keys()}
 
 def compute_metrics(labels, preds, use_th=True, suffix=None):
     labels, preds = labels.flatten(), preds.flatten()
@@ -32,48 +20,116 @@ def compute_metrics(labels, preds, use_th=True, suffix=None):
         res = keys_append(res, suffix)
     return res
 
+def compute_metrics_own(labels, preds, use_th=True, suffix=None):
+    eps = 1e-7
+    if use_th:
+        preds = preds > 0.5
+    tp = torch.sum((preds == 1) & (labels == 1), dim=(1, 2, 3))
+    tn = torch.sum((preds == 0) & (labels == 0), dim=(1, 2, 3))
+    fp = torch.sum((preds == 1) & (labels == 0), dim=(1, 2, 3))
+    fn = torch.sum((preds == 0) & (labels == 1), dim=(1, 2, 3))
+    # dim-s account for samples in batch
+
+    dice = (2 * tp) / (2 * tp + fp + fn + eps)  # intersection twice in the denominator
+    iou = tp / (tp + fp + fn + eps)  # == Jaccard score; intersection only once in the denominator
+    accuracy = (tp + tn) / (tp + tn + fp + fn + eps)
+    precision = tp / (tp + fp + eps)
+    recall = tp / (tp + fn + eps)
+    f1 = (2 * precision * recall) / (precision + recall + eps)
+    res = {'Accuracy': accuracy,
+            'Precision': precision,
+            'Recall': recall,
+            'Dice': dice,
+            'F1': f1,
+            'IoU': iou}
+    
+    # average over batch
+    res = {k: torch.mean(v).item() for k, v in res.items()}
+    
+    if suffix is not None:
+        res = keys_append(res, suffix)
+    return res
+
+
+def evaluate_metrics(model, loader, criterion=None, suffix=None, device='cuda'):
+    model.eval()
+    loss = 0
+    # labels, preds = [], []
+    metrics = []
+    with torch.no_grad():
+        for s in tqdm(loader):
+            x, y = s['image'].to(device), s['label'].to(device)
+            logits = model(x)
+            if criterion is not None:
+                loss += criterion(logits, y).item()
+            pred = torch.sigmoid(logits)
+            # labels.append(y.cpu().numpy())
+            # preds.append(pred.cpu().numpy())
+            metrics.append(compute_metrics_own(y, pred))
+    
+    metrics = {**lod_mean(metrics), "Loss": loss / len(loader)}
+    if suffix is not None:
+        metrics = keys_append(metrics, suffix)
+    return metrics
+
+def evaluate_get_preds(model, loader, criterion=None, device='cuda'):
+    model.eval()
+    loss = 0
+    labels, preds = [], []
+    with torch.no_grad():
+        for s in tqdm(loader):
+            x, y = s['image'].to(device), s['label'].to(device)
+            logits = model(x)
+            if criterion is not None:
+                loss += criterion(logits, y).item()
+            pred = torch.sigmoid(logits)
+            labels.append(y.cpu().numpy())
+            preds.append(pred.cpu().numpy())
+    return {"Loss": loss / len(loader),
+            "Labels": np.concatenate(labels),
+            "Preds": np.concatenate(preds)}
+
 def keys_append(dictionary, suffix):
     """Appends suffix to all keys in dictionary."""
     return {k + suffix: v for k, v in dictionary.items()}
-"""
-    :filename util.py (originally EarlyStopping.py)
 
-    Early Stopping adapted from: vvvvvvv
-
-    Early stopping is used to avoid overfitting of the model.
-    As the PyTorch library does not contain built-in early stopping, this class is from following repository:
-    https://github.com/Bjarten/early-stopping-pytorch
-
-    Original author:
-    Bjarte Mehus Sunde, 2018
-
-    Original author's mail:
-    BjarteSunde@outlook.com
-
-    Licence:
-    MIT License
-
-    Copyright (c) 2018 Bjarte Mehus Sunde
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-"""
 class EarlyStopping:
+    """
+        Early Stopping adapted from: vvvvvvv
+
+        Early stopping is used to avoid overfitting of the model.
+        As the PyTorch library does not contain built-in early stopping, this class is from following repository:
+        https://github.com/Bjarten/early-stopping-pytorch
+
+        Original author:
+        Bjarte Mehus Sunde, 2018
+
+        Original author's mail:
+        BjarteSunde@outlook.com
+
+        Licence:
+        MIT License
+
+        Copyright (c) 2018 Bjarte Mehus Sunde
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+    """
     def __init__(self, patience=10, verbose=False, delta=1e-4, path='checkpoint.pt', trace_func=print):
         self.patience = patience
         self.verbose = verbose

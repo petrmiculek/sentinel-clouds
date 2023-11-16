@@ -7,8 +7,7 @@ from os.path import join, dirname, dirname
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
-from tqdm.notebook import tqdm
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 # local
 from src.data.tiling import crop, pad, pad_with_mask, tile

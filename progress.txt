@@ -44,9 +44,23 @@ Plan:
 
 [2023-11-08 00:37]
 Next:
-- Train on full dataset
-- Log to W&B
+- Train on full dataset  #DONE#
+- Log to W&B  #DONE#
 - Train padded
 - Use padding and mask
-- 7mins+ for datasets loading
+- 7mins+ for datasets loading  #DONE#
 - Augmentations?
+
+metacentrum packages missing:
+torchinfo
+wandb  # praha
+
+Next:
+- mirror back changes from metacentrum
+- Own eval metrics impl
+- Wandb table sample predictions
+- Dice loss
+
+
+Ideas:
+- Loss combinations can be wrapped in a single criterion object
