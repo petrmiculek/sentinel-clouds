@@ -84,5 +84,37 @@ TODO to revert:
 - loader['train'] = loader['test']
 - LRScheduler, EarlyStopping patience
 
+Dice:
+- problematic with all-zero and all-one tiles
+- IoU:
+    - 
 
 
+Sweep:
+- Loss
+    - BCE weighing (>1 increases recall)
+    - Dice smoothing
+    - Dice: sample x batch version
+    - BCE+Dice weighing
+    - MSELoss
+- LR
+- optimizer
+
+
+Doing:
+- check grads
+    - rise high
+    - 000inf
+- monitor both losses during training
+- why does a perfect prediction get nonzero loss - OK
+
+Order:
+1) train as is: BCE(1e-2)+Dice
+- ok, low grads
+2) batch_size = 8
+3) batch dice loss
+3) pos_weight = 1 / labels.mean()
+
+- no optimizer step, yet val metrics differ accross epochs
+    training is the same
+    
