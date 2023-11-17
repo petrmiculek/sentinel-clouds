@@ -121,11 +121,15 @@ class CloudProcessedDataset(CloudRawDataset):
         if self.images[0].shape[0] == 5:
             self.crop_pad_mask = 'pad_with_mask'
 
-        # TODO debug
-        limit = 1
-        step_size = 21
-        self.images = self.images[45:46]
-        self.labels = self.labels[45:46]
+        # # TODO debug
+        # i_pos = np.where(self.labels.mean(axis=(1, 2)) > 0.5)[0]
+        # i_neg = np.where(self.labels.mean(axis=(1, 2)) <= 0.5)[0]
+        # # keep one pos one neg sample
+        # self.labels = np.concatenate([self.labels[i_pos[:1]], self.labels[i_neg[:1]]], axis=0)
+        # self.images = np.concatenate([self.images[i_pos[:1]], self.images[i_neg[:1]]], axis=0)
+        # limit = len(self.images) // 10
+        # self.labels = self.labels[:limit]
+        # self.images = self.images[:limit]
 
 def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """

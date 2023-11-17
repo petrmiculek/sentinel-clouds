@@ -75,9 +75,10 @@ class EarlyStopping:
 
 # import one_hot
 class DiceLoss(torch.nn.Module):
-    def __init__(self, one_hot=False) -> None:
+    def __init__(self, eps1=1e-6, eps2=1e-6, one_hot=False) -> None:
         super(DiceLoss, self).__init__()
-        self.eps: float = 1e-6
+        self.eps1: float = eps1
+        self.eps2: float = eps2
         self.one_hot = one_hot
 
     def forward(
@@ -105,22 +106,23 @@ class DiceLoss(torch.nn.Module):
             target = torch.stack([1 - target, target], dim=1)
             pred = torch.stack([1 - pred, pred], dim=1)
 
-        # compute the actual dice score
+        # compute the dice score
         dims = (1, 2, 3)
         intersection = torch.sum(pred * target, dims)
         union = torch.sum(pred + target, dims)
+        dice_score = (2 * intersection + self.eps1) / (union + self.eps2)
+        return torch.mean(1 - dice_score)  # score to loss
 
-        dice_score = 2 * intersection / (union + self.eps)
-        return torch.mean(1 - dice_score)
-
-class DiceAndBCELoss(torch.nn.Module):
-    def __init__(self, bce_factor=1) -> None:
-        super(DiceAndBCELoss, self).__init__()
-        self.bce = torch.nn.BCEWithLogitsLoss()
-        self.dice = DiceLoss()
+class DiceAndBCELogitLoss(torch.nn.Module):
+    def __init__(self, bce_factor=1, dice_factor=1, pos_weight=None, eps1=1e-6, eps2=1e-6, one_hot=False) -> None:
+        super(DiceAndBCELogitLoss, self).__init__()
+        self.bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        self.dice = DiceLoss(eps1=eps1, eps2=eps2, one_hot=one_hot)
         self.bce_losses = []
         self.dice_losses = []
         self.bce_factor = bce_factor
+        self.dice_factor = dice_factor
+        self.pos_weight = pos_weight
     
     def forward(
             self,
@@ -128,7 +130,7 @@ class DiceAndBCELoss(torch.nn.Module):
             target: torch.Tensor) -> torch.Tensor:
         pred_sig = torch.sigmoid(pred)
         bce_loss = self.bce(pred, target) * self.bce_factor
-        dice_loss = self.dice(pred_sig, target)
+        dice_loss = self.dice(pred_sig, target) * self.dice_factor
         self.bce_losses.append(bce_loss.item())
         self.dice_losses.append(dice_loss.item())
         return bce_loss + dice_loss
