@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 from torch.nn import MSELoss, BCELoss, BCEWithLogitsLoss
-from torch.optim import AdamW, Adam
+from torch.optim import AdamW, Adam, SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.functional import sigmoid
 from torch.cuda.amp import GradScaler
@@ -48,9 +48,9 @@ HP.batch_size = 1
 ''' Model '''
 # -
 ''' Training '''
-HP.epochs = 12
+HP.epochs = 30
 # HP.warmup_prop = 0.1  # TODO lr warmup
-HP.lr = 5e-3
+HP.lr = 5e-2
 wb.init(project="clouds", config=HP, mode='disabled')
 wb.define_metric("batches")
 wb.define_metric("Training Loss", step_metric='batches')
@@ -84,8 +84,8 @@ model = smp.Unet(
 model_summary = summary(model, input_size=(1, 4, 224, 224))
 # %% 
 # print(model_summary)  # already printed in the summary call
-criterion = DiceLoss()  # BCEWithLogitsLoss()  #  
-optimizer = Adam(model.parameters(), lr=HP.lr, weight_decay=1e-2)
+criterion = DiceAndBCELoss(bce_factor=0.1)  # BCEWithLogitsLoss() # DiceLoss()  # 0.01
+optimizer = SGD(model.parameters(), lr=HP.lr, weight_decay=1e-2)
 scaler = GradScaler()  # mixed precision training (16-bit)
 early_stopping = EarlyStopping(patience=50, path=checkpoint_path)  # TODO 50 debug
 scheduler = ReduceLROnPlateau(optimizer, patience=30)
@@ -108,6 +108,7 @@ for epoch in range(epochs_trained, epochs_trained + HP.epochs):
     model = model.train()
     ep_train_loss = 0
     metrics_train = []
+    criterion.bce_losses, criterion.dice_losses = [], []
     try:
         progress_bar = tqdm(loader['train'], mininterval=1., desc=f'ep{epoch} train')
         for i, sample in enumerate(progress_bar, start=1):
@@ -115,10 +116,11 @@ for epoch in range(epochs_trained, epochs_trained + HP.epochs):
             # forward pass
             with autocast(device_type='cuda', dtype=torch.float16):
                 logits = model(img)  # prediction
-                pred = sigmoid(logits)  # is torch.float16
-                loss = criterion(pred, label)
+                loss = criterion(logits, label)
             # backward pass
             scaler.scale(loss).backward()
+            # clip gradients
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
             if i % grad_acc_steps == 0:  # gradient step with accumulated gradients
                 scaler.step(optimizer)
                 scaler.update()
@@ -127,6 +129,7 @@ for epoch in range(epochs_trained, epochs_trained + HP.epochs):
             #   wb.log({'Training Loss': loss, 'batches': i + epoch * len(loader['train'])})
             with torch.no_grad():  # save predictions
                 ep_train_loss += loss.cpu().numpy()
+                pred = sigmoid(logits)  # is torch.float16
                 metrics_train.append(compute_metrics_own(label, pred))
             progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=False)
         # end of training epoch loop
@@ -137,6 +140,7 @@ for epoch in range(epochs_trained, epochs_trained + HP.epochs):
     ep_train_loss /= len(loader['train'])
     metrics_train = {k: np.mean([m[k] for m in metrics_train]) for k in metrics_train[0].keys()}
     metrics_train = keys_append(metrics_train, ' Training')
+    print(f'BCE: {np.mean(criterion.bce_losses):.4f}, Dice: {np.mean(criterion.dice_losses):.4f}')
     ''' Validation loop '''
     model = model.eval()
     metrics_val = evaluate_metrics(model, loader['val'], criterion, suffix=' Validation')
@@ -174,3 +178,24 @@ for i, _ in enumerate(img):
     table.add_data(wb.Image(img_i), wb.Image(label_i), wb.Image(pred_i))
 
 wb.log({'Training Batch': table})
+
+# %% Loss experimenting
+# lb = BCEWithLogitsLoss()
+# ld = DiceLoss()
+# lbd = DiceAndBCELoss()
+
+# t = s['label'].to(device)
+
+# log0 = torch.zeros_like(t).to(device) - 1e4
+# log1 = torch.ones_like(t).to(device) + 1e4
+# desigmoid = lambda x: torch.log(x / (1 - x))
+# logt = desigmoid(t)
+# assert torch.allclose(t, sigmoid(logt))
+
+# p0 = torch.zeros_like(t).to(device)
+# p1 = torch.ones_like(t).to(device)
+
+# arr = np.array([[lb(log0, t).item(), lb(log1, t).item(), lb(logt, t).item()],
+#                 [ld(p0, t).item(), ld(p1, t).item(), ld(t, t).item()],
+#                 [lbd(log0, t).item(), lbd(log1, t).item(), lbd(logt, t).item()]])
+# print(arr)

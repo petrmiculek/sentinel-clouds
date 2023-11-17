@@ -21,10 +21,12 @@ def compute_metrics_own(labels, preds, use_th=True, suffix=None):
     eps = 1e-7
     if use_th:
         preds = preds > 0.5
-    tp = torch.sum((preds == 1) & (labels == 1), dim=(1, 2, 3))
-    tn = torch.sum((preds == 0) & (labels == 0), dim=(1, 2, 3))
-    fp = torch.sum((preds == 1) & (labels == 0), dim=(1, 2, 3))
-    fn = torch.sum((preds == 0) & (labels == 1), dim=(1, 2, 3))
+    labels = labels > 0.5
+    dims = (1, 2, 3)
+    tp = torch.sum((preds == 1) & (labels == 1), dim=dims)
+    tn = torch.sum((preds == 0) & (labels == 0), dim=dims)
+    fp = torch.sum((preds == 1) & (labels == 0), dim=dims)
+    fn = torch.sum((preds == 0) & (labels == 1), dim=dims)
     # dim-s account for samples in batch
 
     dice = (2 * tp) / (2 * tp + fp + fn + eps)  # intersection twice in the denominator
@@ -65,8 +67,11 @@ def evaluate_metrics(model, loader, criterion=None, suffix=None, device='cuda'):
             # labels.append(y.cpu().numpy())
             # preds.append(pred.cpu().numpy())
             metrics.append(compute_metrics_own(y, pred))
+        loss = loss / len(loader)
+        progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=True)
+
     
-    metrics = {**lod_mean(metrics), "Loss": loss / len(loader)}
+    metrics = {**lod_mean(metrics), "Loss": loss}
     if suffix is not None:
         metrics = keys_append(metrics, suffix)
     return metrics

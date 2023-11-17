@@ -73,6 +73,16 @@ What's wrong:
 - Loss - tried multiple
 - Learning Rate - tried many
 - Data - @@@
-- Batch size - tried 1
+- Batch size - using 1
+- Eval metrics - fixed label-smoothing issue
+
+TODO to revert:
+- shuffling val/test
+- batch size 1
+- loss DiceAndBCE - use it; don't store history
+- dataset limit len
+- loader['train'] = loader['test']
+- LRScheduler, EarlyStopping patience
+
 
 

@@ -122,10 +122,10 @@ class CloudProcessedDataset(CloudRawDataset):
             self.crop_pad_mask = 'pad_with_mask'
 
         # TODO debug
-        # limit = 4
-        # step_size = 21
-        # self.images = self.images[:limit * step_size:step_size]
-        # self.labels = self.labels[:limit * step_size:step_size]
+        limit = 1
+        step_size = 21
+        self.images = self.images[45:46]
+        self.labels = self.labels[45:46]
 
 def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """

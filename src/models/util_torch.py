@@ -73,10 +73,12 @@ class EarlyStopping:
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
 
+# import one_hot
 class DiceLoss(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, one_hot=False) -> None:
         super(DiceLoss, self).__init__()
         self.eps: float = 1e-6
+        self.one_hot = one_hot
 
     def forward(
             self,
@@ -95,13 +97,13 @@ class DiceLoss(torch.nn.Module):
             raise ValueError(
                 "pred and target must be in the same device. Got: {}" .format(
                     pred.device, target.device))
-        # compute softmax over the classes axis
-        # - model outputs are already softmax-ed
 
         # create the labels one hot tensor
-        # target_one_hot = one_hot(target, num_classes=pred.shape[1],
-                                #  device=pred.device, dtype=pred.dtype)
-        # - Binary labels => not needed. ... but my impl will behave differently
+        if self.one_hot:
+            # not needed for binary labels 
+            # ... but my impl will behave differently than the multiclass original
+            target = torch.stack([1 - target, target], dim=1)
+            pred = torch.stack([1 - pred, pred], dim=1)
 
         # compute the actual dice score
         dims = (1, 2, 3)
@@ -112,23 +114,24 @@ class DiceLoss(torch.nn.Module):
         return torch.mean(1 - dice_score)
 
 class DiceAndBCELoss(torch.nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, bce_factor=1) -> None:
         super(DiceAndBCELoss, self).__init__()
         self.bce = torch.nn.BCEWithLogitsLoss()
         self.dice = DiceLoss()
         self.bce_losses = []
         self.dice_losses = []
+        self.bce_factor = bce_factor
     
     def forward(
             self,
             pred: torch.Tensor,
             target: torch.Tensor) -> torch.Tensor:
         pred_sig = torch.sigmoid(pred)
-        bce_loss = self.bce(pred, target)
+        bce_loss = self.bce(pred, target) * self.bce_factor
         dice_loss = self.dice(pred_sig, target)
         self.bce_losses.append(bce_loss.item())
         self.dice_losses.append(dice_loss.item())
-        return bce_loss * 0 + dice_loss
+        return bce_loss + dice_loss
 
 def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon: float = 1e-6):
     # Average of Dice coefficient for all batches, or for a single mask
