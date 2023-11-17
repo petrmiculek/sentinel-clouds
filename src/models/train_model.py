@@ -23,6 +23,7 @@ from torch.cuda.amp import GradScaler
 from torch import autocast, sigmoid
 from tqdm.auto import tqdm
 from torchinfo import summary
+# from timm.scheduler import CosineLRScheduler  # TODO unused
 import wandb as wb
 import segmentation_models_pytorch as smp
 # local
@@ -45,30 +46,32 @@ path_data = '/mnt/sdb1/code/sentinel2/processed'
 
 # %%
 # Hyperparameters
-HP = SimpleNamespace()
+wb.init(project="clouds")  # mode='disabled'
+cfg = wb.config
 ''' Preprocessing '''
-HP.tile_size = 224
-HP.crop_pad_mask = 'crop'
+cfg.tile_size = 224
+cfg.crop_pad_mask = 'crop'
 # -
 ''' Data '''
-HP.workers = 0
-HP.batch_size = 1
+cfg.workers = 0
+cfg.batch_size = 1
 ''' Model '''
 # -
 ''' Training '''
-HP.epochs = 5
-# HP.warmup_prop = 0.1  # TODO lr warmup
-HP.lr = 5e-3
-wb.init(project="clouds", config=HP, mode='disabled')
-wb.define_metric("batches")
-wb.define_metric("Training Loss", step_metric='batches')
+cfg.epochs = 5
+cfg.lr = 5e-3
+cfg.bce_factor=1
+cfg.dice_factor=1
+# cfg.warmup_prop = 0.1  # TODO lr warmup
+# wb.define_metric("batches")
+# wb.define_metric("Training Loss", step_metric='batches')
 run_name = wb.run.name
 outputs_dir = join('runs', run_name)
 os.makedirs(outputs_dir, exist_ok=True)
 checkpoint_path = join(outputs_dir, 'model_checkpoint.pt')
 # %%
-dataset_kwargs = {'tile_size': HP.tile_size, 'crop_pad_mask': HP.crop_pad_mask}  # doesn't matter when using processed data
-loader_kwargs = {'batch_size': HP.batch_size, 'num_workers': HP.workers, 'pin_memory': True}
+dataset_kwargs = {'tile_size': cfg.tile_size, 'crop_pad_mask': cfg.crop_pad_mask}  # doesn't matter when using processed data
+loader_kwargs = {'batch_size': cfg.batch_size, 'num_workers': cfg.workers, 'pin_memory': True}
 loader = get_loaders_processed(path_data, splits=['test', 'val'], **dataset_kwargs, **loader_kwargs)
 loader['train'] = loader['test']  # TODO: debug, remove
 # %% Model + training setup
@@ -80,17 +83,17 @@ model_summary = summary(model, input_size=(1, 4, 224, 224))
 # %%
 # print(model_summary)  # already printed in the summary call
 train_mean = loader['train'].dataset.labels.mean()
-pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else None
+cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else 1
 
-criterion = DiceAndBCELogitLoss(bce_factor=1e-2, dice_factor=1)  # , pos_weight=pos_weight)
-# criterion = BCEWithLogitsLoss()
-optimizer = Adam(model.parameters(), lr=HP.lr)  # , weight_decay=1e-2
+criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor)  # , pos_weight=pos_weight)
+optimizer = Adam(model.parameters(), lr=cfg.lr)  # , weight_decay=1e-2
 scaler = GradScaler()  # mixed precision training (16-bit)
 early_stopping = EarlyStopping(patience=50, path=checkpoint_path)  # TODO 50 debug
-scheduler = ReduceLROnPlateau(optimizer, patience=30)
+scheduler = ReduceLROnPlateau(optimizer, patience=20)
+# scheduler = CosineLRScheduler(optimizer, t_initial=epoch_steps // 3, warmup_t=warmup_steps, warmup_lr_init=1e-6, lr_min=2e-8, cycle_decay=0.7, cycle_mul=3, cycle_limit=3)
 # wb_watch_freq = 100
 # wb.watch(model, criterion, log='gradients', log_freq=wb_watch_freq)
-wb.config.update({'criterion': criterion.__class__.__name__,'optimizer': optimizer.__class__.__name__,
+cfg.update({'criterion': criterion.__class__.__name__,'optimizer': optimizer.__class__.__name__,
                    'scheduler': scheduler.__class__.__name__,'architecture': model.__class__.__name__,
                     'train_size': len(loader['train'].dataset),'model_bytes': model_summary.total_param_bytes,
                    'model_params': model_summary.total_params})
@@ -100,7 +103,7 @@ best_res = None
 epochs_trained = 0
 stop_training = False
 grad_acc_steps = 1
-for epoch in range(epochs_trained, epochs_trained + HP.epochs):
+for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     model = model.train()
     ep_train_loss = 0
     metrics_train = []
@@ -141,13 +144,12 @@ for epoch in range(epochs_trained, epochs_trained + HP.epochs):
     ep_dice = np.mean(criterion.dice_losses)
     metrics_train = {k: np.mean([m[k] for m in metrics_train]) for k in metrics_train[0].keys()}
     metrics_train = keys_append(metrics_train, ' Training')
-    # print(f'BCE: {ep_bce:.4f}, Dice: {ep_dice:.4f}')
     ''' Validation loop '''
     model = model.eval()
     metrics_val = evaluate_metrics(model, loader['val'], criterion, suffix=' Validation')
     # log results
     res_epoch = {'Loss Training': ep_train_loss, 'Grad Training': ep_grad,
-                 'BCE Training': ep_bce, 'Dice Training': ep_dice,
+                 'BCELoss Training': ep_bce, 'DiceLoss Training': ep_dice,
                    **metrics_train, **metrics_val
                    }
     print_dict(res_epoch, title=f'Epoch {epoch}')
