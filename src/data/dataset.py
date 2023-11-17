@@ -98,6 +98,8 @@ class CloudRawDataset(Dataset):
         else: 
             pad_mask = np.ones((1, x.shape[1], x.shape[2]), dtype=np.float32)
         y = self.labels[index]
+        # label smoothing  TODO parameter
+        y = y * 0.9 + 0.05
         return {'image': x, 'label': y, 'pad_mask': pad_mask}
     
     def save_processed(self, path_save):
@@ -119,6 +121,11 @@ class CloudProcessedDataset(CloudRawDataset):
         if self.images[0].shape[0] == 5:
             self.crop_pad_mask = 'pad_with_mask'
 
+        # TODO debug
+        # limit = 4
+        # step_size = 21
+        # self.images = self.images[:limit * step_size:step_size]
+        # self.labels = self.labels[:limit * step_size:step_size]
 
 def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """
@@ -149,7 +156,7 @@ def get_loaders_processed(dir_data_processed, splits=None, **loader_kwargs):
     loaders = dict()
     for split in splits:
         assert split in ['train', 'val', 'test']
-        shuffle = shuffle_train if split == 'train' else False
+        shuffle = shuffle_train if split == 'train' else True  # TODO changed for debug
         dataset = CloudProcessedDataset(join(dir_data_processed, f'{split}.npz'))
         loader = DataLoader(dataset, shuffle=shuffle, **loader_kwargs)
         loaders[split] = loader

@@ -54,13 +54,25 @@ Next:
 metacentrum packages missing:
 torchinfo
 wandb  # praha
+segmentation_models_pytorch
 
 Next:
-- mirror back changes from metacentrum
-- Own eval metrics impl
-- Wandb table sample predictions
-- Dice loss
-
+- mirror back changes from metacentrum  #DONE#
+- Own eval metrics impl  #DONE#
+- Wandb table sample predictions  #DONE#
+- Dice loss  #DONE#
 
 Ideas:
-- Loss combinations can be wrapped in a single criterion object
+- Loss combinations can be wrapped in a single criterion object  #DONE#
+- Label smoothing 0.05 - 0.95 
+    - no positive change for BCEWithLogitsLoss
+    - Dice - shouldn't matter at all
+
+What's wrong:
+- Model implementation - try existing #DONE#
+- Loss - tried multiple
+- Learning Rate - tried many
+- Data - @@@
+- Batch size - tried 1
+
+
