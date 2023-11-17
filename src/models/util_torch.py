@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch import Tensor
+import segmentation_models_pytorch as smp
 
 class EarlyStopping:
     """
@@ -113,11 +114,13 @@ class DiceLoss(torch.nn.Module):
         dice_score = (2 * intersection + self.eps1) / (union + self.eps2)
         return torch.mean(1 - dice_score)  # score to loss
 
+
 class DiceAndBCELogitLoss(torch.nn.Module):
     def __init__(self, bce_factor=1, dice_factor=1, pos_weight=None, eps1=1e-6, eps2=1e-6, one_hot=False) -> None:
         super(DiceAndBCELogitLoss, self).__init__()
         self.bce = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        self.dice = DiceLoss(eps1=eps1, eps2=eps2, one_hot=one_hot)
+        # self.dice = DiceLoss(eps1=eps1, eps2=eps2, one_hot=one_hot)
+        self.dice = smp.losses.FocalLoss(mode='binary', alpha=0.5, gamma=2, reduction='mean')
         self.bce_losses = []
         self.dice_losses = []
         self.bce_factor = bce_factor
