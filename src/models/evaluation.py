@@ -57,12 +57,12 @@ def evaluate_metrics(model, loader, criterion=None, suffix=None, device='cuda'):
     metrics = []
     with torch.no_grad():
         progress_bar = tqdm(loader)
-        for s in progress_bar:
+        for i, s in enumerate(progress_bar, start=1):
             x, y = s['image'].to(device), s['label'].to(device)
             logits = model(x)
             if criterion is not None:
                 loss += criterion(logits, y).item()
-                progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=False)
+                progress_bar.set_postfix(loss=f'{loss / i:.4f}', refresh=False)
             pred = torch.sigmoid(logits)
             # labels.append(y.cpu().numpy())
             # preds.append(pred.cpu().numpy())

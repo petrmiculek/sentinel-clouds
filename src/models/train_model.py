@@ -10,6 +10,7 @@ sys.path.append(abspath(join('../..')))  # ,'src'
 # print("Python imports path:", "\n".join(sys.path))
 # %%
 # standard library
+import argparse
 from copy import deepcopy
 from types import SimpleNamespace
 # external
@@ -23,7 +24,7 @@ from torch.cuda.amp import GradScaler
 from torch import autocast, sigmoid
 from tqdm.auto import tqdm
 from torchinfo import summary
-# from timm.scheduler import CosineLRScheduler  # TODO unused
+from timm.scheduler import CosineLRScheduler  # TODO unused
 import wandb as wb
 import segmentation_models_pytorch as smp
 # local
@@ -34,7 +35,6 @@ from src.models.evaluation import evaluate_metrics, compute_metrics_own
 from src.models.util import keys_append, print_dict
 from src.visualization.visualize import plot_many
 
-
 # set numpy/torch print precision .4f
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
@@ -43,25 +43,27 @@ torch.set_printoptions(precision=4, sci_mode=False)
 use_pos_weight = False
 path_data = '/mnt/sdb1/code/sentinel2/processed'
 # path_data = '/storage/brno2/home/petrmiculek/sentinel2/processed'
+parser = argparse.ArgumentParser()
+parser.add_argument('--data', '-d', type=str, default=path_data, help='path to data')
 
 # %%
 # Hyperparameters
-wb.init(project="clouds")  # mode='disabled'
+wb.init(project="clouds", mode='disabled')  # 
 cfg = wb.config
 ''' Preprocessing '''
 cfg.tile_size = 224
 cfg.crop_pad_mask = 'crop'
 # -
 ''' Data '''
-cfg.workers = 0
+cfg.workers = 1
 cfg.batch_size = 1
 ''' Model '''
-# -
+cfg.backbone = "resnet18"  # "timm-res2net50_26w_4s"  # "resnet18"
 ''' Training '''
-cfg.epochs = 5
+cfg.epochs = 10
 cfg.lr = 5e-3
 cfg.bce_factor=1
-cfg.dice_factor=1
+cfg.dice_factor=0.1
 # cfg.warmup_prop = 0.1  # TODO lr warmup
 # wb.define_metric("batches")
 # wb.define_metric("Training Loss", step_metric='batches')
@@ -71,13 +73,13 @@ os.makedirs(outputs_dir, exist_ok=True)
 checkpoint_path = join(outputs_dir, 'model_checkpoint.pt')
 # %%
 dataset_kwargs = {'tile_size': cfg.tile_size, 'crop_pad_mask': cfg.crop_pad_mask}  # doesn't matter when using processed data
-loader_kwargs = {'batch_size': cfg.batch_size, 'num_workers': cfg.workers, 'pin_memory': True}
+loader_kwargs = {'batch_size': cfg.batch_size, 'num_workers': cfg.workers, 'pin_memory': True, 'shuffle': True}
 loader = get_loaders_processed(path_data, splits=['test', 'val'], **dataset_kwargs, **loader_kwargs)
 loader['train'] = loader['test']  # TODO: debug, remove
 # %% Model + training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # model = UNet(in_channels=4).to(device)
-model = smp.Unet(encoder_name="resnet18",  # encoder, e.g. mobilenet_v2 or efficientnet-b7
+model = smp.Unet(encoder_name=cfg.backbone,  # encoder, e.g. mobilenet_v2 or efficientnet-b7
     encoder_weights=None,in_channels=4,classes=1).to(device)
 model_summary = summary(model, input_size=(1, 4, 224, 224))
 # %%
@@ -88,9 +90,10 @@ cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight el
 criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor)  # , pos_weight=pos_weight)
 optimizer = Adam(model.parameters(), lr=cfg.lr)  # , weight_decay=1e-2
 scaler = GradScaler()  # mixed precision training (16-bit)
-early_stopping = EarlyStopping(patience=50, path=checkpoint_path)  # TODO 50 debug
-scheduler = ReduceLROnPlateau(optimizer, patience=20)
-# scheduler = CosineLRScheduler(optimizer, t_initial=epoch_steps // 3, warmup_t=warmup_steps, warmup_lr_init=1e-6, lr_min=2e-8, cycle_decay=0.7, cycle_mul=3, cycle_limit=3)
+early_stopping = EarlyStopping(patience=10, path=checkpoint_path)  # TODO 50 debug
+# scheduler = ReduceLROnPlateau(optimizer, patience=20)
+epoch_steps = len(loader['train'])
+scheduler = CosineLRScheduler(optimizer, t_initial=cfg.epochs * epoch_steps, warmup_t=epoch_steps * 3, warmup_lr_init=1e-6, lr_min=2e-7, cycle_decay=0.7, cycle_mul=3, cycle_limit=3)
 # wb_watch_freq = 100
 # wb.watch(model, criterion, log='gradients', log_freq=wb_watch_freq)
 cfg.update({'criterion': criterion.__class__.__name__,'optimizer': optimizer.__class__.__name__,
@@ -109,6 +112,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     metrics_train = []
     criterion.bce_losses, criterion.dice_losses = [], []
     ep_grad = 0
+    print('lr:', optimizer.param_groups[0]['lr'])
     try:
         progress_bar = tqdm(loader['train'], mininterval=1., desc=f'ep{epoch} train')
         for i, sample in enumerate(progress_bar, start=1):
@@ -121,7 +125,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
             loss.backward()
             # scaler.scale(loss).backward()
             # clip gradients
-            ep_grad += torch.nn.utils.clip_grad_norm_(model.parameters(), 1, error_if_nonfinite=True).item()
+            ep_grad += torch.nn.utils.clip_grad_norm_(model.parameters(), 3, error_if_nonfinite=True).item()
             # if i % grad_acc_steps == 0:  # gradient step with accumulated gradients
                 # scaler.step(optimizer)
                 # scaler.update()
@@ -132,6 +136,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
                 ep_train_loss += loss.cpu().numpy()
                 pred = sigmoid(logits)  # is torch.float16
                 metrics_train.append(compute_metrics_own(label, pred))
+            scheduler.step(i + epoch * epoch_steps)
             progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=False)
         # end of training epoch loop
     except KeyboardInterrupt:
@@ -150,7 +155,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     # log results
     res_epoch = {'Loss Training': ep_train_loss, 'Grad Training': ep_grad,
                  'BCELoss Training': ep_bce, 'DiceLoss Training': ep_dice,
-                   **metrics_train, **metrics_val
+                   **metrics_train, **metrics_val, 'lr': optimizer.param_groups[0]['lr']
                    }
     print_dict(res_epoch, title=f'Epoch {epoch}')
     wb.log(res_epoch, step=epoch)
@@ -158,7 +163,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
         best_accu_val = metrics_val['Accuracy Validation']
         best_res = deepcopy(res_epoch)
     epochs_trained += 1
-    scheduler.step(metrics_val['Loss Validation'])  # LR scheduler
+    # scheduler.step(metrics_val['Loss Validation'])  # used for ReduceLROnPlateau
     early_stopping(metrics_val['Loss Validation'], model)  # model checkpointing
     if early_stopping.early_stop or stop_training:
         print('Early stopping')
