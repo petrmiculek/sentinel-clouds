@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 from torch.nn import MSELoss, BCELoss, BCEWithLogitsLoss
-from torch.optim import AdamW, Adam, SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.functional import sigmoid
 from torch.cuda.amp import GradScaler
@@ -54,6 +53,8 @@ parser.add_argument('--arch', type=str, default='Unet', choices=['Unet', 'UnetPl
 parser.add_argument('--no_log', '-n', action='store_true', help='disable logging to wandb')
 parser.add_argument('--weigh_bce', '-w', action='store_true', help='use bce loss weighting')
 parser.add_argument('--loss', '-l', type=str, default='dice', choices=['dice', 'jaccard', 'mcc', 'focal'], help='2nd loss used (except bce)')
+parser.add_argument('--workers', type=int, default=1, help='number of dataloader workers')
+parser.add_argument('--optim', type=str, default='AdamW', choices=['AdamW', 'Adam', 'SGD'], help='optimizer')
 args = parser.parse_args()
 if args.data == 'meta':
     args.data = '/storage/brno2/home/petrmiculek/sentinel2/processed'
@@ -64,7 +65,7 @@ cfg = wb.config
 cfg.tile_size = 224
 cfg.crop_pad_mask = 'crop'
 ''' Data '''
-cfg.workers = 1
+cfg.workers = args.workers
 cfg.batch_size = args.batch_size
 ''' Model '''
 cfg.backbone = args.backbone
@@ -75,6 +76,7 @@ cfg.lr = args.lr
 cfg.loss = args.loss
 cfg.bce_factor = args.bce
 cfg.dice_factor = args.dice
+cfg.optim = args.optim
 run_name = wb.run.name
 outputs_dir = join('runs', run_name)
 os.makedirs(outputs_dir, exist_ok=True)
@@ -94,18 +96,16 @@ assert model(torch.randn(1, 4, 224, 224, device=device)).shape == (1, 1, 224, 22
 train_mean = loader['train'].dataset.labels.mean()
 cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else None
 criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor, choice=cfg.loss, pos_weight=cfg.pos_weight)
-optimizer = Adam(model.parameters(), lr=cfg.lr, weight_decay=1e-2)
+optimizer = getattr(torch.optim, cfg.optim)(model.parameters(), lr=cfg.lr, weight_decay=1e-3)
 scaler = GradScaler()
-early_stopping = EarlyStopping(patience=10, path=checkpoint_path)  # TODO 50 debug
+early_stopping = EarlyStopping(patience=25, path=checkpoint_path)  # TODO 50 debug
 # scheduler = ReduceLROnPlateau(optimizer, patience=20)
 epoch_steps = len(loader['train'])
-scheduler = CosineLRScheduler(optimizer, t_initial=cfg.epochs * epoch_steps, warmup_t=epoch_steps * 3, warmup_lr_init=1e-6, lr_min=2e-7, cycle_decay=0.7, cycle_mul=3, cycle_limit=3)
+scheduler = CosineLRScheduler(optimizer, t_initial=cfg.epochs * epoch_steps * 3 // 4, warmup_t=epoch_steps * 5, warmup_lr_init=1e-5, lr_min=2e-8, cycle_decay=1e-3)  # cycle_mul=3, cycle_limit=3
 # wb_watch_freq = 100
 # wb.watch(model, criterion, log='gradients', log_freq=wb_watch_freq)
-cfg.update({'criterion': criterion.__class__.__name__,'optimizer': optimizer.__class__.__name__,
-                   'scheduler': scheduler.__class__.__name__,'architecture': model.__class__.__name__,
-                    'train_size': len(loader['train'].dataset),'model_bytes': model_summary.total_param_bytes,
-                   'model_params': model_summary.total_params})
+cfg.update({'scheduler': scheduler.__class__.__name__, 'train_size': len(loader['train'].dataset),
+    'model_bytes': model_summary.total_param_bytes, 'model_params': model_summary.total_params})
 # %% Training
 best_accu_val = 0
 best_res = None
@@ -118,7 +118,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     metrics_train = []
     criterion.bce_losses, criterion.dice_losses = [], []
     ep_grad = 0
-    print(f"lr: {optimizer.param_groups[0]['lr']:.4f}")
+    print(f"lr: {optimizer.param_groups[0]['lr']:.4e}")
     try:
         progress_bar = tqdm(loader['train'], mininterval=1., desc=f'ep{epoch} train')
         for i, sample in enumerate(progress_bar, start=1):
@@ -161,7 +161,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     # log results
     res_epoch = {'Loss Training': ep_train_loss, 'Grad Training': ep_grad,
                  'BCELoss Training': ep_bce, 'DiceLoss Training': ep_dice,
-                   **metrics_train, **metrics_val, 'lr': optimizer.param_groups[0]['lr']
+                   **metrics_train, **metrics_val, 'Learning Rate': optimizer.param_groups[0]['lr']
                    }
     print_dict(res_epoch, title=f'Epoch {epoch}')
     wb.log(res_epoch, step=epoch)
@@ -194,6 +194,7 @@ for i, _ in enumerate(img):
     pred_i = pred[i].detach().cpu().numpy() > 0.5
     table.add_data(wb.Image(img_i), wb.Image(label_i), wb.Image(pred_i))
 wb.log({'Training Batch': table})
+cfg.update({'epochs': epochs_trained}, allow_val_change=True)
 
 # %% Loss experimenting
 if False:

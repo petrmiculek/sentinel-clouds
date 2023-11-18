@@ -114,3 +114,5 @@ Order:
 
 - no optimizer step, yet val metrics differ accross epochs
     training is the same -> batch normalization during training
+
+

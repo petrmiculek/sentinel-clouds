@@ -138,8 +138,8 @@ class DiceAndBCELogitLoss(torch.nn.Module):
             self.dice = MCCLoss()
         elif choice == 'focal':
             self.dice = smp.losses.FocalLoss(mode='binary', alpha=0.5, gamma=2, reduction='mean')
-        
-        self.dice = MCCLoss()
+        else:
+            raise ValueError(f"Invalid loss choice {choice}")
         self.bce_losses = []
         self.dice_losses = []
         self.bce_factor = bce_factor
