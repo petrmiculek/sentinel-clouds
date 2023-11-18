@@ -70,7 +70,7 @@ Ideas:
 
 What's wrong:
 - Model implementation - try existing #DONE#
-- Loss - tried multiple
+- Loss - tried multiple implementations
 - Learning Rate - tried many
 - Data - @@@
 - Batch size - using 1
@@ -87,8 +87,6 @@ TODO to revert:
 Dice:
 - problematic with all-zero and all-one tiles
 - IoU:
-    - 
-
 
 Sweep:
 - Loss
@@ -99,7 +97,6 @@ Sweep:
     - MSELoss
 - LR
 - optimizer
-
 
 Doing:
 - check grads
@@ -116,5 +113,4 @@ Order:
 3) pos_weight = 1 / labels.mean()
 
 - no optimizer step, yet val metrics differ accross epochs
-    training is the same
-    
+    training is the same -> batch normalization during training

@@ -42,54 +42,60 @@ torch.set_printoptions(precision=4, sci_mode=False)
 # args
 use_pos_weight = False
 path_data = '/mnt/sdb1/code/sentinel2/processed'
-# path_data = '/storage/brno2/home/petrmiculek/sentinel2/processed'
 parser = argparse.ArgumentParser()
-parser.add_argument('--data', '-d', type=str, default=path_data, help='path to data')
-
-# %%
-# Hyperparameters
-wb.init(project="clouds", mode='disabled')  # 
+parser.add_argument('--data', type=str, default=path_data, help='path to dataset')
+parser.add_argument('--lr', type=float, default=5e-3, help='learning rate')
+parser.add_argument('--epochs', '-e', type=int, default=10, help='number of epochs')
+parser.add_argument('--batch_size', '-b', type=int, default=1, help='batch size')
+parser.add_argument('--bce', type=float, default=1, help='bce loss factor')
+parser.add_argument('--dice', type=float, default=0, help='dice loss factor')
+parser.add_argument('--backbone', type=str, default='resnet18', help="backbone architecture, e.g. resnet18, timm-res2net50_26w_4s, timm-regnetx_002")
+parser.add_argument('--arch', type=str, default='Unet', choices=['Unet', 'UnetPlusPlus', 'DeepLabV3Plus'], help='architecture')
+parser.add_argument('--no_log', '-n', action='store_true', help='disable logging to wandb')
+parser.add_argument('--weigh_bce', '-w', action='store_true', help='use bce loss weighting')
+parser.add_argument('--loss', '-l', type=str, default='dice', choices=['dice', 'jaccard', 'mcc', 'focal'], help='2nd loss used (except bce)')
+args = parser.parse_args()
+if args.data == 'meta':
+    args.data = '/storage/brno2/home/petrmiculek/sentinel2/processed'
+# %% Hyperparameters
+wb.init(project="clouds", mode='disabled' if args.no_log else None)
 cfg = wb.config
 ''' Preprocessing '''
 cfg.tile_size = 224
 cfg.crop_pad_mask = 'crop'
-# -
 ''' Data '''
 cfg.workers = 1
-cfg.batch_size = 1
+cfg.batch_size = args.batch_size
 ''' Model '''
-cfg.backbone = "resnet18"  # "timm-res2net50_26w_4s"  # "resnet18"
+cfg.backbone = args.backbone
+cfg.architecture = args.arch
 ''' Training '''
-cfg.epochs = 10
-cfg.lr = 5e-3
-cfg.bce_factor=1
-cfg.dice_factor=0.1
-# cfg.warmup_prop = 0.1  # TODO lr warmup
-# wb.define_metric("batches")
-# wb.define_metric("Training Loss", step_metric='batches')
+cfg.epochs = args.epochs
+cfg.lr = args.lr
+cfg.loss = args.loss
+cfg.bce_factor = args.bce
+cfg.dice_factor = args.dice
 run_name = wb.run.name
 outputs_dir = join('runs', run_name)
 os.makedirs(outputs_dir, exist_ok=True)
-checkpoint_path = join(outputs_dir, 'model_checkpoint.pt')
-# %%
+checkpoint_path = join(outputs_dir, 'model_checkpoint.pt') if not args.no_log else None
+# %% Dataset
 dataset_kwargs = {'tile_size': cfg.tile_size, 'crop_pad_mask': cfg.crop_pad_mask}  # doesn't matter when using processed data
 loader_kwargs = {'batch_size': cfg.batch_size, 'num_workers': cfg.workers, 'pin_memory': True, 'shuffle': True}
-loader = get_loaders_processed(path_data, splits=['test', 'val'], **dataset_kwargs, **loader_kwargs)
+loader = get_loaders_processed(args.data, splits=['test', 'val'], **dataset_kwargs, **loader_kwargs)
 loader['train'] = loader['test']  # TODO: debug, remove
 # %% Model + training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # model = UNet(in_channels=4).to(device)
-model = smp.Unet(encoder_name=cfg.backbone,  # encoder, e.g. mobilenet_v2 or efficientnet-b7
-    encoder_weights=None,in_channels=4,classes=1).to(device)
+model = getattr(smp, cfg.architecture)(encoder_name=cfg.backbone, encoder_weights=None, in_channels=4, classes=1).to(device)
 model_summary = summary(model, input_size=(1, 4, 224, 224))
-# %%
-# print(model_summary)  # already printed in the summary call
+# test model forward pass
+assert model(torch.randn(1, 4, 224, 224, device=device)).shape == (1, 1, 224, 224)
 train_mean = loader['train'].dataset.labels.mean()
-cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else 1
-
-criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor)  # , pos_weight=pos_weight)
-optimizer = Adam(model.parameters(), lr=cfg.lr)  # , weight_decay=1e-2
-scaler = GradScaler()  # mixed precision training (16-bit)
+cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else None
+criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor, choice=cfg.loss, pos_weight=cfg.pos_weight)
+optimizer = Adam(model.parameters(), lr=cfg.lr, weight_decay=1e-2)
+scaler = GradScaler()
 early_stopping = EarlyStopping(patience=10, path=checkpoint_path)  # TODO 50 debug
 # scheduler = ReduceLROnPlateau(optimizer, patience=20)
 epoch_steps = len(loader['train'])
@@ -112,7 +118,7 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     metrics_train = []
     criterion.bce_losses, criterion.dice_losses = [], []
     ep_grad = 0
-    print('lr:', optimizer.param_groups[0]['lr'])
+    print(f"lr: {optimizer.param_groups[0]['lr']:.4f}")
     try:
         progress_bar = tqdm(loader['train'], mininterval=1., desc=f'ep{epoch} train')
         for i, sample in enumerate(progress_bar, start=1):
