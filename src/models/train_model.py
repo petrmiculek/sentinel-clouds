@@ -12,33 +12,34 @@ sys.path.append(abspath(join('../..')))  # ,'src'
 # standard library
 import argparse
 from copy import deepcopy
-from types import SimpleNamespace
+# from types import SimpleNamespace
 # external
 import numpy as np
 import torch
-from torch.nn import MSELoss, BCELoss, BCEWithLogitsLoss
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+# from torch.nn import MSELoss, BCELoss, BCEWithLogitsLoss
+# from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.functional import sigmoid
-from torch.cuda.amp import GradScaler
-from torch import autocast, sigmoid
+# from torch.cuda.amp import GradScaler
+from torch import sigmoid  # , autocast
 from tqdm.auto import tqdm
 from torchinfo import summary
 from timm.scheduler import CosineLRScheduler  # TODO unused
 import wandb as wb
 import segmentation_models_pytorch as smp
 # local
-from src.data.dataset import get_loaders, get_loaders_processed
-from src.models.unet import UNet
-from src.models.util_torch import EarlyStopping, DiceLoss, dice_loss, DiceAndBCELogitLoss
+from src.data.dataset import get_loaders_processed  # , get_loaders
+# from src.models.unet import UNet
+from src.models.util_torch import EarlyStopping
+from src.models.losses import DiceAndBCELogitLoss
 from src.models.evaluation import evaluate_metrics, compute_metrics_own
 from src.models.util import keys_append, print_dict
-from src.visualization.visualize import plot_many
+# from src.visualization.visualize import plot_many
 
-# set numpy/torch print precision .4f
+# set numpy/torch print precision to .4f
 np.set_printoptions(precision=4, suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 
-# args
+# Parsing arguments
 use_pos_weight = False
 path_data = '/mnt/sdb1/code/sentinel2/processed'
 parser = argparse.ArgumentParser()
@@ -97,7 +98,6 @@ train_mean = loader['train'].dataset.labels.mean()
 cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight else None
 criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor, choice=cfg.loss, pos_weight=cfg.pos_weight)
 optimizer = getattr(torch.optim, cfg.optim)(model.parameters(), lr=cfg.lr, weight_decay=1e-3)
-scaler = GradScaler()
 early_stopping = EarlyStopping(patience=40, path=checkpoint_path)  # don't stop training, save best model
 # scheduler = ReduceLROnPlateau(optimizer, patience=20)
 epoch_steps = len(loader['train'])

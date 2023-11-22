@@ -16,7 +16,7 @@ Doing:
 [2023-11-05 23:55]
 Tiling done
 - crop, pad, mask
-- untiling needs testing (skipping for now)
+- untiling needs testing #DONE#
 
 [2023-11-07 14:02]
 Training works
