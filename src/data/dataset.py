@@ -121,15 +121,6 @@ class CloudProcessedDataset(CloudRawDataset):
         if self.images[0].shape[0] == 5:
             self.crop_pad_mask = 'pad_with_mask'
 
-        # # TODO debug
-        # i_pos = np.where(self.labels.mean(axis=(1, 2)) > 0.5)[0]
-        # i_neg = np.where(self.labels.mean(axis=(1, 2)) <= 0.5)[0]
-        # # keep one pos one neg sample
-        # self.labels = np.concatenate([self.labels[i_pos[:1]], self.labels[i_neg[:1]]], axis=0)
-        # self.images = np.concatenate([self.images[i_pos[:1]], self.images[i_neg[:1]]], axis=0)
-        # limit = len(self.images) // 10
-        # self.labels = self.labels[:limit]
-        # self.images = self.images[:limit]
 
 def get_loaders(dir_data, tile_size=None, crop_pad_mask='crop', **loader_kwargs):
     """ Dataset-loading wrapper - get train/val/test DataLoaders. """
@@ -154,14 +145,16 @@ def get_loaders_processed(dir_data_processed, splits=None, **loader_kwargs):
     # TODO seed for workers
     tile_size = loader_kwargs.pop('tile_size', None)
     crop_pad_mask = loader_kwargs.pop('crop_pad_mask', None)
+    batch_size_train = loader_kwargs.pop('batch_size', 1)
     if tile_size is not None or crop_pad_mask is not None:
         print(f'Ignoring dataset args: {loader_kwargs}, loading dataset already processed.')
     shuffle_train = loader_kwargs.pop('shuffle', True)
     loaders = dict()
     for split in splits:
         assert split in ['train', 'val', 'test']
-        shuffle = shuffle_train if split == 'train' else True  # TODO changed for debug
+        shuffle = shuffle_train if split == 'train' else False
+        batch_size = batch_size_train if split == 'train' else 1
         dataset = CloudProcessedDataset(join(dir_data_processed, f'{split}.npz'))
-        loader = DataLoader(dataset, shuffle=shuffle, **loader_kwargs)
+        loader = DataLoader(dataset, shuffle=shuffle, batch_size=batch_size, **loader_kwargs)
         loaders[split] = loader
     return loaders

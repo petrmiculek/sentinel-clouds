@@ -116,3 +116,12 @@ Order:
     training is the same -> batch normalization during training
 
 
+Co udělá můj model s větším snímkem?
+- repeat tile NxN: will output tile?
+Umí onnx arbitrary input size?
+Kvantizace x onnx a jiné exporty
+
+Future work:
+- Augmentations
+- Fixed seed
+- W&B Artifacts

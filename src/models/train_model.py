@@ -84,11 +84,11 @@ checkpoint_path = join(outputs_dir, 'model_checkpoint.pt') if not args.no_log el
 # %% Dataset
 dataset_kwargs = {'tile_size': cfg.tile_size, 'crop_pad_mask': cfg.crop_pad_mask}  # doesn't matter when using processed data
 loader_kwargs = {'batch_size': cfg.batch_size, 'num_workers': cfg.workers, 'pin_memory': True, 'shuffle': True}
-loader = get_loaders_processed(args.data, splits=['test', 'val'], **dataset_kwargs, **loader_kwargs)
-loader['train'] = loader['test']  # TODO: debug, remove
+loader = get_loaders_processed(args.data, splits=['train', 'val'], **dataset_kwargs, **loader_kwargs)
+# loader['train'] = loader['test']  # TODO: debug, remove
 # %% Model + training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# model = UNet(in_channels=4).to(device)
+# model = UNet(in_channels=4).to(device)  # unused, own implementation did not train well
 model = getattr(smp, cfg.architecture)(encoder_name=cfg.backbone, encoder_weights=None, in_channels=4, classes=1).to(device)
 model_summary = summary(model, input_size=(1, 4, 224, 224))
 # test model forward pass
@@ -98,12 +98,10 @@ cfg.pos_weight = (3 - 2*train_mean) / (4*train_mean + 1e-1) if use_pos_weight el
 criterion = DiceAndBCELogitLoss(cfg.bce_factor, cfg.dice_factor, choice=cfg.loss, pos_weight=cfg.pos_weight)
 optimizer = getattr(torch.optim, cfg.optim)(model.parameters(), lr=cfg.lr, weight_decay=1e-3)
 scaler = GradScaler()
-early_stopping = EarlyStopping(patience=25, path=checkpoint_path)  # TODO 50 debug
+early_stopping = EarlyStopping(patience=40, path=checkpoint_path)  # don't stop training, save best model
 # scheduler = ReduceLROnPlateau(optimizer, patience=20)
 epoch_steps = len(loader['train'])
-scheduler = CosineLRScheduler(optimizer, t_initial=cfg.epochs * epoch_steps * 3 // 4, warmup_t=epoch_steps * 5, warmup_lr_init=1e-5, lr_min=2e-8, cycle_decay=1e-3)  # cycle_mul=3, cycle_limit=3
-# wb_watch_freq = 100
-# wb.watch(model, criterion, log='gradients', log_freq=wb_watch_freq)
+scheduler = CosineLRScheduler(optimizer, t_initial=cfg.epochs * epoch_steps, warmup_t=epoch_steps * 5, warmup_lr_init=1e-5, lr_min=2e-8, cycle_decay=1e-3)  # cycle_mul=3, cycle_limit=3
 cfg.update({'scheduler': scheduler.__class__.__name__, 'train_size': len(loader['train'].dataset),
     'model_bytes': model_summary.total_param_bytes, 'model_params': model_summary.total_params})
 # %% Training
@@ -124,26 +122,19 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
         for i, sample in enumerate(progress_bar, start=1):
             img, label = sample['image'].to(device, non_blocking=True), sample['label'].to(device, non_blocking=True)
             # forward pass
-            # with autocast(device_type='cuda', dtype=torch.float16):
-            logits = model(img)  # prediction
+            logits = model(img)
             loss = criterion(logits, label)
             # backward pass
             loss.backward()
-            # scaler.scale(loss).backward()
-            # clip gradients
-            ep_grad += torch.nn.utils.clip_grad_norm_(model.parameters(), 3, error_if_nonfinite=True).item()
-            # if i % grad_acc_steps == 0:  # gradient step with accumulated gradients
-                # scaler.step(optimizer)
-                # scaler.update()
-                # optimizer.zero_grad(set_to_none=True)
+            ep_grad += torch.nn.utils.clip_grad_norm_(model.parameters(), 20, error_if_nonfinite=True).item()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             with torch.no_grad():  # save predictions
                 ep_train_loss += loss.cpu().numpy()
-                pred = sigmoid(logits)  # is torch.float16
+                pred = sigmoid(logits)
                 metrics_train.append(compute_metrics_own(label, pred))
+                progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=False)
             scheduler.step(i + epoch * epoch_steps)
-            progress_bar.set_postfix(loss=f'{loss:.4f}', refresh=False)
         # end of training epoch loop
     except KeyboardInterrupt:
         print(f'Ctrl+C stopped training')
@@ -174,76 +165,25 @@ for epoch in range(epochs_trained, epochs_trained + cfg.epochs):
     if early_stopping.early_stop or stop_training:
         print('Early stopping')
         break
-# %% Eval
-# metrics_val = evaluate_metrics(model, loader['val'], criterion, device)
-# metrics_val
+cfg.update({'epochs': epochs_trained}, allow_val_change=True)
 # %% Export model
+print_dict(best_res, title='Best epoch:')
+torch.save(model.state_dict(), join(outputs_dir, 'model.pt'))  # also save last epoch
+print(f'Saved model to {outputs_dir}')
 if False:
-    # save model as .pt
-    torch.save(model.state_dict(), 'model.pt')
     # save model as onnx
     dummy_input = torch.randn(1, 4, 224, 224, device='cuda')
     torch.onnx.export(model, dummy_input, "model.onnx", verbose=True, opset_version=11, input_names=['input'], output_names=['output'])
 
 # %% Save a batch of predictions to W&B tables
 table = wb.Table(columns=['Image', 'Label', 'Prediction'])
+class_labels = {1: 'Clouds'}
 for i, _ in enumerate(img):
-    # convert image to numpy hwc, label to rgb
-    img_i = img[i].detach().cpu().numpy().transpose((1, 2, 0))
-    label_i = label[i].detach().cpu().numpy() > 0.5
-    pred_i = pred[i].detach().cpu().numpy() > 0.5
-    table.add_data(wb.Image(img_i), wb.Image(label_i), wb.Image(pred_i))
+    # convert image to numpy hwc rgb, label kept single-channel
+    img_i = img[i].detach().cpu().numpy().transpose((1, 2, 0))[:3]
+    label_i = label[i, 0].detach().cpu().numpy() > 0.5
+    pred_i = pred[i, 0].detach().cpu().numpy() > 0.5
+    table.add_data(wb.Image(img_i, masks={"prediction": {"mask_data": pred_i, "class_labels": class_labels}, 
+                                          "ground_truth": {"mask_data": label_i, "class_labels": class_labels}}), 
+                                          wb.Image(label_i), wb.Image(pred_i))
 wb.log({'Training Batch': table})
-cfg.update({'epochs': epochs_trained}, allow_val_change=True)
-
-# %% Loss experimenting
-if False:
-    lb = BCEWithLogitsLoss()
-    lbb = BCELoss()
-    ld = DiceLoss()
-    lbd = DiceAndBCELogitLoss()
-
-    t = sample['label'].to(device)
-
-    log0 = torch.zeros_like(t).to(device) - 2.9444
-    log1 = torch.ones_like(t).to(device) + 2.9444
-    inverse_sigmoid = lambda x: -torch.log(1 / x - 1)
-    logt = inverse_sigmoid(t)
-    assert torch.allclose(t, sigmoid(logt))
-
-    p0 = torch.zeros_like(t).to(device)
-    p1 = torch.ones_like(t).to(device)
-
-    arr = np.array([[lb(log0, t).item(), lb(log1, t).item(), lb(logt, t).item()],
-                    [ld(p0, t).item(), ld(p1, t).item(), ld(t, t).item()],
-                    [lbd(log0, t).item(), lbd(log1, t).item(), lbd(logt, t).item()]])
-    print(arr)
-
-    t0 = torch.zeros_like(t).to(device) + 0.05
-    t1 = torch.ones_like(t).to(device) - 0.05
-
-    at0 = np.array([[lb(log0, t0).item(), lb(log1, t0).item(), lb(logt, t0).item()],
-                    [ld(p0, t0).item(), ld(p1, t0).item(), ld(t, t0).item()],
-                    [lbd(log0, t0).item(), lbd(log1, t0).item(), lbd(logt, t0).item()]])
-    print(at0)
-
-    at1 = np.array([[lb(log0, t1).item(), lb(log1, t1).item(), lb(logt, t1).item()],
-                    [ld(p0, t1).item(), ld(p1, t1).item(), ld(t, t1).item()],
-                    [lbd(log0, t1).item(), lbd(log1, t1).item(), lbd(logt, t1).item()]])
-    print(at1)
-
-
-    # %% Weight init experimenting
-    def weights_init(m):
-        if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Linear):
-            torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            if m.bias is not None:
-                torch.nn.init.constant_(m.bias, 0)
-        elif isinstance(m, torch.nn.BatchNorm2d):
-            torch.nn.init.constant_(m.weight, 1)
-            torch.nn.init.constant_(m.bias, 0)
-
-    # Apply the weights_init function to all layers of the model
-    print(next(iter(model.parameters())).mean())
-    model.apply(weights_init)
-    print(next(iter(model.parameters())).mean())
